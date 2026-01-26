@@ -5,8 +5,7 @@ from typing import Dict, Any, Tuple, Callable
 
 # Loss import
 from src.losses import (
-    log_mse_loss, linear_mse_loss, correlation_loss, 
-    log_gradient_loss, hybrid_loss
+    log_mse_loss, linear_mse_loss
 )
 
 logger = logging.getLogger(__name__)
@@ -14,9 +13,9 @@ logger = logging.getLogger(__name__)
 LOSS_MAP = {
     "log_mse": log_mse_loss,
     "linear_mse": linear_mse_loss,
-    "correlation": correlation_loss,
-    "gradient": log_gradient_loss, # [NEW]
-    "hybrid": hybrid_loss          # [NEW]
+    # "correlation": correlation_loss,
+    # "gradient": log_gradient_loss, # [NEW]
+    # "hybrid": hybrid_loss          # [NEW]
 }
 
 def refine_with_gradient(
