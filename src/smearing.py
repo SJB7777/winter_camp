@@ -16,7 +16,7 @@ def abeles_constant_smearing(
     sld: Tensor,
     sample_length: Tensor,
     beam_width: Tensor,
-    dq: Tensor | None = None,
+    dq: Tensor = None,
     gauss_num: int = 51,
     xrr_dq: bool = True,
     abeles_func=None,
@@ -216,4 +216,3 @@ def _batch_linear_interp1d(x: Tensor, y: Tensor, x_new: Tensor) -> Tensor:
     y_new = y_lo + slope * (x_new - x_lo)
     
     return y_new
-

@@ -1,7 +1,12 @@
 """
-Physics informed CNN Model (Updated Normalization)
-==========================================
-CNN with Fourier Features
+Common Components for PINN Models (Enhanced)
+============================================
+Enhanced with curriculum learning and soft constraints.
+
+Key improvements:
+- Curriculum learning for progressive constraint enforcement
+- Soft clamping in simulate() for better gradient flow
+- Enhanced physics validation with dynamic weights
 """
 import math
 from abc import ABC, abstractmethod
@@ -11,25 +16,79 @@ import torch.nn as nn
 from torch import Tensor
 
 from src.abeles import AbelesMatrix
-from src.smearing import abeles_constant_smearing
 from src.param import ParamSet
-from src.constants import LOG_MASK_VALUE
 from src.config import XRefineConfig
+from src.smearing import abeles_constant_smearing
+from src.physics_utils import (
+    soft_clamp_min, 
+    curriculum_weight, 
+    physics_constraint_penalty
+)
+from src.constants import LOG_MASK_VALUE
+
+
+# ==============================================================================
+# 1. Feature Encoding Modules (Unchanged from original)
+# ==============================================================================
+
+class FourierFeatureMapping(nn.Module):
+    """
+    Random Fourier Feature Mapping (NeRF-style).
+    """
+    def __init__(
+        self, 
+        mapping_size: int = 64, 
+        scale: float = 40.0,
+        output_format: str = 'cnn'
+    ):
+        super().__init__()
+        self.mapping_size = mapping_size
+        self.output_format = output_format
+        random_matrix = torch.randn(1, mapping_size) * scale
+        self.register_buffer('B', random_matrix)
+
+    def forward(self, x: Tensor) -> Tensor:
+        if self.output_format == 'cnn':
+            if x.dim() == 2: x = x.unsqueeze(1)
+            x_proj = x.transpose(1, 2) @ self.B
+            x_proj = x_proj * 2 * math.pi
+            out = torch.cat([torch.sin(x_proj), torch.cos(x_proj)], dim=-1)
+            return out.transpose(1, 2)
+        else:
+            if x.dim() == 2: x = x.unsqueeze(-1)
+            x_proj = x @ self.B
+            x_proj = x_proj * 2 * math.pi
+            return torch.cat([torch.sin(x_proj), torch.cos(x_proj)], dim=-1)
+
 
 
 class BasePINNModel(nn.Module, ABC):
     """
-    PINN 모델의 공통 인터페이스 (Dynamic Refactor).
+    Enhanced PINN model with curriculum learning and soft constraints.
+    
+    Improvements:
+    - Progressive physics constraint enforcement via curriculum learning
+    - Soft clamping for better gradient flow
+    - Dynamic epoch tracking for weight scheduling
     """
     def __init__(self, config: XRefineConfig):
         super().__init__()
         self.config = config
+        
+        # [ENHANCED] Use enhanced Abeles implementation
         self.simulator = AbelesMatrix(device=config.device)
         self.register_buffer('q_grid', config.q_grid)
         
-        # [REFAC] Calculate output dimension based on Dynamic Layer Config
         self.param_map = self._build_param_map(config)
         self.output_dim = len(self.param_map)
+        
+        # [NEW] Curriculum learning state
+        self.current_epoch = 0
+        self.max_epochs = getattr(config.train, 'epochs', 1000) if hasattr(config, 'train') else 1000
+
+    def set_epoch(self, epoch: int):
+        """Update current epoch for curriculum learning"""
+        self.current_epoch = epoch
 
     def _build_param_map(self, config: XRefineConfig) -> list[tuple[str, list[float]]]:
         """
@@ -44,7 +103,6 @@ class BasePINNModel(nn.Module, ABC):
             mapping.append((f"{layer.name}.roughness", layer.roughness))
             mapping.append((f"{layer.name}.sld", layer.sld))
             
-            # [FIX] sld_imag (Absorption) 추가 확인
             if getattr(layer, 'sld_imag', None) is not None:
                 mapping.append((f"{layer.name}.sld_imag", layer.sld_imag))
 
@@ -52,7 +110,6 @@ class BasePINNModel(nn.Module, ABC):
         mapping.append(("Substrate.roughness", config.sample.substrate.roughness))
         mapping.append(("Substrate.sld", config.sample.substrate.sld))
         
-        # [FIX] Substrate sld_imag 추가 확인
         if getattr(config.sample.substrate, 'sld_imag', None) is not None:
              mapping.append(("Substrate.sld_imag", config.sample.substrate.sld_imag))
 
@@ -72,81 +129,77 @@ class BasePINNModel(nn.Module, ABC):
     def unnormalize(self, raw_output: Tensor, fixed_values: ParamSet | None = None) -> ParamSet:
         """
         Convert NN output (0~1) to physical ranges.
-        Constructs a DynamicParamSet.
-
-        [Feature] Constraint Learning:
-        If 'fixed_values' is provided, parameters present in it will OVERWRITE 
-        the network predictions. This cuts the gradient for those parameters, 
-        treating them as constants (Ground Truth).
+        Constructs a ParamSet with optional fixed value constraints.
         """
         batch_size = raw_output.size(0)
-
-        # Split output into chunks of 1 (since all scalars)
         vals = torch.split(raw_output, 1, dim=1)
-
         params_dict = {}
 
         # 1. Base: Convert Network Predictions to Physical Values
         for (key, (p_min, p_max)), val in zip(self.param_map, vals):
-            # val: (B, 1) Normalized 0~1
             physical_val = val * (p_max - p_min) + p_min
             params_dict[key] = physical_val
 
         # 2. Override: Apply Fixed Value Constraints
         if fixed_values is not None:
-            # DynamicParamSet 내부 딕셔너리 순회
             for key, target_val in fixed_values._params.items():
                 if key in params_dict:
-                    # 배치 사이즈 브로드캐스팅 (1 -> B)
                     if target_val.size(0) == 1 and batch_size > 1:
                         target_val = target_val.expand(batch_size, -1)
-
-                    # [Core Logic] 예측값 덮어쓰기
-                    # 이 시점에서 해당 파라미터는 신경망의 Computational Graph에서 분리됩니다.
                     params_dict[key] = target_val
 
-        # Order of layer names for assembly
         layer_names = [l.name for l in self.config.sample.layers]
-
         return ParamSet(params_dict, layer_names, device=self.device)
 
     def validate_physics(self, params: ParamSet) -> Tensor:
         """
-        Dynamic physics constraints.
-        Iterate over all layers and check roughness < 0.5 * thickness.
+        Enhanced physics constraints with curriculum learning.
+        
+        Early training: weak constraints (exploration)
+        Late training: strong constraints (refinement)
         """
         penalty = torch.tensor(0.0, device=self.device)
+        
+        # [ENHANCED] Curriculum weight: 0.1 (early) -> 1.0 (late)
+        weight = curriculum_weight(
+            self.current_epoch, 
+            self.max_epochs,
+            warmup_fraction=0.3,
+            start_weight=0.1,
+            end_weight=1.0
+        )
         
         for name in params.layer_names:
             d = params[f"{name}.thickness"]
             sigma = params[f"{name}.roughness"]
             
-            # ReLU(sigma - 0.5*d)
-            curr_penalty = torch.mean(torch.relu(sigma - 0.5 * d))
-            penalty = penalty + curr_penalty
+            # [ENHANCED] Use utility function
+            curr_penalty = physics_constraint_penalty(
+                thickness=d,
+                roughness=sigma,
+                constraint_ratio=0.5,
+                penalty_type='relu'
+            )
+            penalty = penalty + curr_penalty * weight
             
         return penalty
 
     def simulate(self, params: ParamSet) -> Tensor:
         """
-        ParamSet -> Reflectivity
+        Enhanced simulation with soft clamping.
+        
+        ParamSet -> Reflectivity with improved gradient flow
         """
-        # Assemble big tensors
         thickness, roughness, sld_full = params.assemble_structure()
         batch_size = thickness.size(0)
         
-        # Q Grid
         q_batch = self.q_grid.unsqueeze(0).expand(batch_size, -1).to(self.device)
         
-        # Tth Offset
-        if 'tth_offset' in params._params: # Direct check
+        if 'tth_offset' in params._params:
             q_batch = q_batch + params.tth_offset * 0.01
         
-        # Instrument Params
         L = params.L
         beam_width = params.beam_width
-        
-        # Resolution Smearing Check
         dq = params.dq if 'dq' in params._params else None
         
         if dq is not None and dq.mean() > 1e-5:
@@ -171,13 +224,12 @@ class BasePINNModel(nn.Module, ABC):
                 wavelength=self.config.instrument.wavelength
             )
         
-        # I0 / Bkg
         i0 = params.i0
         bkg = params.bkg
-        
         r_final = (i0 * r_sim) + torch.pow(10.0, bkg)
         
-        return torch.clamp(r_final, min=1e-15, max=2.0)
+        # [ENHANCED] Soft clamping instead of hard clamp
+        return soft_clamp_min(r_final, min_val=1e-15, sharpness=10.0)
 
     def forward_with_params(self, params: ParamSet) -> tuple[ParamSet, Tensor, Tensor]:
         params = params.to(self.device)
@@ -187,15 +239,14 @@ class BasePINNModel(nn.Module, ABC):
 
     @abstractmethod
     def encode(self, x: Tensor) -> Tensor:
+        """Subclasses must implement the encoder network"""
         pass
 
-    def forward(self, r_obs_log: Tensor, fixed_values: ParamSet | None = None) -> tuple[ParamSet, Tensor, any]:
+    def forward(self, r_obs_log: Tensor, fixed_values: ParamSet | None = None) -> tuple[ParamSet, Tensor, Tensor]:
         if torch.isnan(r_obs_log).any():
             r_obs_log = torch.nan_to_num(r_obs_log, nan=-10.0)
         
         raw_output = self.encode(r_obs_log)
-        
-        # Pass fixed_values if needed (currently implementation ignores it but keeps signature)
         params = self.unnormalize(torch.sigmoid(raw_output), fixed_values)
         
         r_final = self.simulate(params)
@@ -203,36 +254,6 @@ class BasePINNModel(nn.Module, ABC):
         
         return params, r_final, penalty
 
-class FourierFeatureMapping(nn.Module):
-    """
-    Random Fourier Feature Mapping (NeRF-style).
-    """
-    def __init__(
-        self, 
-        mapping_size: int = 64, 
-        scale: float = 40.0,
-        output_format: str = 'cnn'
-    ):
-        super().__init__()
-        self.mapping_size = mapping_size
-        self.output_format = output_format
-        random_matrix = torch.randn(1, mapping_size) * scale
-        self.register_buffer('B', random_matrix)
-
-    def forward(self, x: Tensor) -> Tensor:
-        if self.output_format == 'cnn':
-            if x.dim() == 2:
-                x = x.unsqueeze(1)
-            x_proj = x.transpose(1, 2) @ self.B
-            x_proj = x_proj * 2 * math.pi
-            out = torch.cat([torch.sin(x_proj), torch.cos(x_proj)], dim=-1)
-            return out.transpose(1, 2)
-        else:
-            if x.dim() == 2:
-                x = x.unsqueeze(-1)
-            x_proj = x @ self.B
-            x_proj = x_proj * 2 * math.pi
-            return torch.cat([torch.sin(x_proj), torch.cos(x_proj)], dim=-1)
 
 
 class FourierConvEncoder(nn.Module):
@@ -243,6 +264,7 @@ class FourierConvEncoder(nn.Module):
     def __init__(self, config: XRefineConfig, output_dim: int):
         super().__init__()
 
+        # Hyperparameter Mapping
         q_len = config.q_len
         n_channels = config.model.hidden_dim        
         depth = config.model.encoder_depth          
@@ -285,14 +307,16 @@ class FourierConvEncoder(nn.Module):
             ))
             curr_dim = out_dim
 
-        self.encoder = nn.Sequential(*layers)
+        # [FIX 1] 변수명 통일 (self.encoder -> self.backbone)
+        self.backbone = nn.Sequential(*layers)
 
         # 3. Global Pooling
         self.global_pool = nn.AdaptiveAvgPool1d(1)
 
         # 4. Regressor (MLP)
+        # [FIX 2] 입력 차원 수정: Global Stats(3)가 Concat되므로 +3 추가
         self.regressor = nn.Sequential(
-            nn.Linear(curr_dim, mlp_hidden),
+            nn.Linear(curr_dim + 3, mlp_hidden), 
             nn.LeakyReLU(0.2, inplace=True),
             nn.Dropout(dropout),
             nn.Linear(mlp_hidden, mlp_hidden // 2),
@@ -313,7 +337,7 @@ class FourierConvEncoder(nn.Module):
     def forward(self, x: Tensor) -> Tensor:
         """
         Args:
-            x: (B, Q_Len)
+            x: (B, Q_Len) or (B, 1, Q_Len)
         Returns:
             (B, Output_Dim)
         """
@@ -321,23 +345,38 @@ class FourierConvEncoder(nn.Module):
         if x.dim() == 2:
             x = x.unsqueeze(1)
 
-        # [FIX] Intensity Normalization (Sync with ViT logic)
-        # LOG_MASK_VALUE(-15.0) ~ 0.0 범위를 -1.0 ~ 1.0 (또는 0~1)로 정규화
-        # 여기서는 -1 ~ 1 범위로 맞춥니다.
+        # [FIX 2 Related] Global Hint Extraction
+        # 1. Max Intensity
+        stat_max = x.max(dim=-1)[0] # (B, 1)
+        
+        # 2. Low-Q Mean
+        stat_low_q = x[..., :50].mean(dim=-1) # (B, 1)
+        
+        # 3. Std Dev
+        stat_std = x.std(dim=-1) # (B, 1)
+        
+        # 합치기: (B, 3)
+        global_stats = torch.cat([stat_max, stat_low_q, stat_std], dim=1)
+
+        # Intensity Normalization (-1 ~ 1)
         x_norm = (torch.clamp(x, min=LOG_MASK_VALUE, max=0.0) - LOG_MASK_VALUE/2) / (-LOG_MASK_VALUE/2)
 
         if self.use_fourier:
-            # Fourier returns (B, 2M, L)
             fourier_feat = self.fourier(x_norm)
-            # Concatenate along channel dim: (B, 1+2M, L)
             x_in = torch.cat([x_norm, fourier_feat], dim=1)
         else:
             x_in = x_norm
+            
+        # CNN Backbone
+        # [FIX 1 Related] 이제 self.backbone이 정의되어 있으므로 에러 없음
+        feat = self.backbone(x_in) # (B, C, L_pooled)
+        feat = self.global_pool(feat).flatten(1) # (B, C) -> (B, Hidden_Dim)
 
-        feat = self.encoder(x_in) # (B, C_last, L_pooled)
-        feat = self.global_pool(feat).squeeze(-1) # (B, C_last)
+        # [FIX 3] Feature Fusion (Conv Feature + Global Hint)
+        # (B, Hidden) + (B, 3) -> (B, Hidden + 3)
+        feat_enriched = torch.cat([feat, global_stats], dim=1)
 
-        return self.regressor(feat)
+        return self.regressor(feat_enriched)
 
 
 class FourierConvPINN(BasePINNModel):

@@ -1,62 +1,68 @@
-# XRefine Configuration File (v2.5 - Strict Complex Mode & Optimized Architecture)
-# ==============================================================================
-
-# [1. General Settings]
 experiment_name: "XRefine_Fourier_Metal_v1"
 save_root: "D:\\03_Resources\\Data\\XRR_AI\\xrefine"
 log_dir: "logs"
-device: "cpu"  # A100/3090/4090 Native
+device: "cuda"
 
 # [2. Measurement Specs]
-# 데이터 포인트 수(q_len)는 3000으로 유지하되, 
-# 메모리가 부족하면 2000으로 줄이는 것도 고려 가능
 q_min_tth: 0.05
 q_max_tth: 15.0
 q_len: 3000
 
-# [3. Instrument Hardware (Fixed Constants)]
+# [NEW] Data Preprocessing Configuration
+data:
+  # Normalization mode: "plateau" | "max" | "anchor" | "none"
+  # IMPORTANT: Must match the mode used during training!
+  # - plateau: Low-angle top-mean = 1.0 (robust, recommended)
+  # - max: Global max = 1.0 (simple)
+  # - anchor: Specific angle (anchor_tth) = 1.0 (physical)
+  # - none: No normalization (raw data)
+  normalization_mode: "anchor"  # [USER REQUEST]
+  anchor_tth: 0.2               # [USER REQUEST] Target 2theta angle
+  plateau_q_limit: 0.08   # For "plateau" mode: Q upper limit
+
+
+# [3. Instrument Hardware (True Constants)]
+# 파장은 하드웨어 고유값이므로 유일한 상수입니다.
 instrument:
-  wavelength: 1.5406
-  beam_width: 0.1
-  res: 0.002
-  I0: 1.0
-  Ibkg_init: 1.0e-07
+  wavelength: 1.5406  # Cu K-alpha
 
 # =============================================================================
-# [4. Sample Configuration (Dynamic Ranges)]
-# [IMPORTANT] generator.py requires ALL instrument keys (L, beam_width, etc.)
+# [4. Simulation Parameters (Dynamic Training Ranges)]
+# AI는 아래 범위 내에서 무작위로 값을 뽑아 학습합니다.
 # =============================================================================
 sample:
-  # 4.1. Global / Instrument Parameters (Nuisance)
-  # 범위(Range)는 [Min, Max] 형태여야 함
-  L: [5.0, 25.0]             # Sample Length
-  beam_width: [0.01, 0.3]    # Beam Width
-  bkg: [-10.0, -5.0]         # Log Background
+  # 4.1. Global / Instrument Parameters (Variables)
+  # [FIX] Section 3에 있던 고정값들을 삭제하고, 여기서 범위로만 관리합니다.
+  
+  L: [5.0, 30.0]             # Sample Length (mm)
+  beam_width: [0.02, 0.4]    # Beam Width (mm) - 학습 시엔 변동, 피팅 시엔 고정 가능
+  dq: [0.0005, 0.02]         # Resolution (Instrumental broadening)
+  
   i0: [0.8, 1.2]             # Intensity Scale
-  dq: [0.0005, 0.005]        # Resolution Smearing
-  tth_offset: [-0.03, 0.03]  # Theta Offset
+  bkg: [-10.0, -5.0]         # Background Level (log scale)
+  tth_offset: [-0.05, 0.05]  # Zero-point error
 
   # 4.2. Substrate
   substrate:
     name: "Substrate"
     roughness: [0.0, 8.0]
-    sld: [18.0, 22.0]        # Si ~20
-    sld_imag: [0.0, 1.0]     # [Must Exist] Absorption (Complex)
+    sld: [18.0, 22.0]
+    sld_imag: [0.0, 1.0]
 
-  # 4.3. Layers (Top -> Bottom)
+  # 4.3. Layers
   layers:
-    - name: "Top_Layer"       # Contamination/Oxide
+    - name: "Top_Layer"
       thickness: [0.0, 50.0]
       roughness: [0.0, 10.0]
       sld: [0.0, 50.0]
-      sld_imag: [0.0, 1.0]    # [Must Exist]
+      sld_imag: [0.0, 1.0]
       repeats: 1
 
-    - name: "Target_Film"     # Main Target
+    - name: "Target_Film"
       thickness: [10.0, 1200.0] 
       roughness: [0.0, 30.0]
-      sld: [0.0, 130.0]       # Metal Range (Organic~Pt/Au)
-      sld_imag: [0.0, 12.0]   # Absorption Range
+      sld: [0.0, 150.0]
+      sld_imag: [0.0, 15.0]
       repeats: 1
 
 # [5. Augmentation Config]
@@ -76,7 +82,7 @@ train:
   epochs: 300
   steps_per_epoch: 20
   warmup_steps: 200
-  
+
   sup_w_start: 10000.0
   sup_w_end: 100.0
   phys_penalty_w: 1.0
@@ -100,19 +106,19 @@ train:
         roughness: 20.0   
         
       Top_Layer:          # Nuisance Layer
-        thickness: 0.5    
-        roughness: 0.5    
-        sld: 0.5
-        sld_imag: 0.1     
+        thickness: 5    
+        roughness: 5    
+        sld: 5
+        sld_imag: 2     
         
       Substrate:          # Nuisance Layer
-        roughness: 0.5    
-        sld: 1.0          
-        sld_imag: 0.1
+        roughness: 5    
+        sld: 5          
+        sld_imag: 2
     
     # Global Parameter Weights (Low Priority)
     global_weights:       
-      i0: 1.0
+      i0: 0.0  # [USER REQUEST] Fixed to 1.0 by normalization, no need to learn
       bkg: 1.0
       L: 0.1
       beam_width: 0.1

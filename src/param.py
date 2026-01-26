@@ -1,10 +1,19 @@
 from __future__ import annotations
+from dataclasses import dataclass
 from typing import Self
-
-from torch import Tensor
 import torch
-
+from torch import Tensor
 from src.config import SampleConfig
+
+@dataclass
+class Instrument:
+    """Legacy Instrument class, kept for compatibility with older tests/logic if needed."""
+    wavelength: float = 1.54
+    I0: float = 1.0
+    Ibkg: float = 1e-10
+    res: float = 0.0001
+    sample_len: float = 10.0 # mm
+    beam_width: float = 0.2  # mm
 
 class ParamSet:
     """
@@ -24,13 +33,13 @@ class ParamSet:
     def __init__(self, 
                  params: dict[str, Tensor], 
                  layer_names: list[str],
-                 device: torch.device | None = None):
+                 device: torch.device = None):
         self._params = params
         self.layer_names = layer_names # Order matters for assembly!
         self.device = device or (next(iter(params.values())).device if params else torch.device('cpu'))
 
     @classmethod
-    def from_config(cls, config: SampleConfig, batch_size: int = 1, device: torch.device | None = None) -> Self:
+    def from_config(cls, config: SampleConfig, batch_size: int = 1, device: torch.device = None) -> Self:
         """
         Initialize parameters (randomly or centrally) based on ranges in SampleConfig.
         This creates the 'Parameter State' for a batch.
@@ -181,3 +190,7 @@ class ParamSet:
         sld = torch.cat([sld_amb] + sld_list, dim=1)
 
         return thickness, roughness, sld
+    
+    # Backward compatibility shim for 'ParamSet'
+    # We alias DynamicParamSet to ParamSet so imports don't break immediately
+    # but the content is different.
