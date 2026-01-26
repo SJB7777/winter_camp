@@ -1,6 +1,11 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+torch
 flask
 gunicorn
 pandas
 matplotlib
 scipy
 numpy
+PyYAML
+pydantic

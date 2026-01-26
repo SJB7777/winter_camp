@@ -1,0 +1,136 @@
+# XRefine Configuration File (v2.5 - Strict Complex Mode & Optimized Architecture)
+# ==============================================================================
+
+# [1. General Settings]
+experiment_name: "XRefine_Fourier_Metal_v1"
+save_root: "D:\\03_Resources\\Data\\XRR_AI\\xrefine"
+log_dir: "logs"
+device: "cpu"  # A100/3090/4090 Native
+
+# [2. Measurement Specs]
+# 데이터 포인트 수(q_len)는 3000으로 유지하되, 
+# 메모리가 부족하면 2000으로 줄이는 것도 고려 가능
+q_min_tth: 0.05
+q_max_tth: 15.0
+q_len: 3000
+
+# [3. Instrument Hardware (Fixed Constants)]
+instrument:
+  wavelength: 1.5406
+  beam_width: 0.1
+  res: 0.002
+  I0: 1.0
+  Ibkg_init: 1.0e-07
+
+# =============================================================================
+# [4. Sample Configuration (Dynamic Ranges)]
+# [IMPORTANT] generator.py requires ALL instrument keys (L, beam_width, etc.)
+# =============================================================================
+sample:
+  # 4.1. Global / Instrument Parameters (Nuisance)
+  # 범위(Range)는 [Min, Max] 형태여야 함
+  L: [5.0, 25.0]             # Sample Length
+  beam_width: [0.01, 0.3]    # Beam Width
+  bkg: [-10.0, -5.0]         # Log Background
+  i0: [0.8, 1.2]             # Intensity Scale
+  dq: [0.0005, 0.005]        # Resolution Smearing
+  tth_offset: [-0.03, 0.03]  # Theta Offset
+
+  # 4.2. Substrate
+  substrate:
+    name: "Substrate"
+    roughness: [0.0, 8.0]
+    sld: [18.0, 22.0]        # Si ~20
+    sld_imag: [0.0, 1.0]     # [Must Exist] Absorption (Complex)
+
+  # 4.3. Layers (Top -> Bottom)
+  layers:
+    - name: "Top_Layer"       # Contamination/Oxide
+      thickness: [0.0, 50.0]
+      roughness: [0.0, 10.0]
+      sld: [0.0, 50.0]
+      sld_imag: [0.0, 1.0]    # [Must Exist]
+      repeats: 1
+
+    - name: "Target_Film"     # Main Target
+      thickness: [10.0, 1200.0] 
+      roughness: [0.0, 30.0]
+      sld: [0.0, 130.0]       # Metal Range (Organic~Pt/Au)
+      sld_imag: [0.0, 12.0]   # Absorption Range
+      repeats: 1
+
+# [5. Augmentation Config]
+augmentations:
+  intensity_noise_scale: 0.02
+  bg_range: [-10.0, -6.0]
+  res_sigma_range: [0.0001, 0.005]
+  q_shift_sigma: 0.001
+  beam_profile: "gaussian"
+  measure_step_range: [0.001, 0.1]
+
+# [6. Training Hyperparameters]
+train:
+  batch_size: 512
+  lr: 0.002
+  weight_decay: 1.0e-4
+  epochs: 300
+  steps_per_epoch: 20
+  warmup_steps: 200
+  
+  sup_w_start: 10000.0
+  sup_w_end: 100.0
+  phys_penalty_w: 1.0
+
+  # Loss Component Weights
+  w_linear: 20.0
+  w_gradient: 50.0
+  w_log_base: 50.0
+  
+  # ===========================================================================
+  # [Focus Strategy] Weights Definition
+  # ===========================================================================
+  weights:
+    
+    # Layer-specific Priority
+    specific_layer_weights:
+      Target_Film:
+        thickness: 200.0  # [Crucial] Thickness accuracy
+        sld: 100.0        # [Crucial] Density accuracy
+        sld_imag: 50.0    # [Important] Absorption
+        roughness: 20.0   
+        
+      Top_Layer:          # Nuisance Layer
+        thickness: 0.5    
+        roughness: 0.5    
+        sld: 0.5
+        sld_imag: 0.1     
+        
+      Substrate:          # Nuisance Layer
+        roughness: 0.5    
+        sld: 1.0          
+        sld_imag: 0.1
+    
+    # Global Parameter Weights (Low Priority)
+    global_weights:       
+      i0: 1.0
+      bkg: 1.0
+      L: 0.1
+      beam_width: 0.1
+      dq: 1.0
+      tth_offset: 1.0
+
+# =============================================================================
+# [7. Model Architecture]
+# =============================================================================
+model:
+  # [Core] Fourier-CNN Model
+  model_type: "fourier_conv" 
+  
+  # [Optimization] Diet Plan for A100 Speedup
+  hidden_dim: 64          # 256 -> 64 (Parameters Reduction)
+  encoder_depth: 6
+  mapping_size: 64        # Fourier Features
+  fourier_scale: 40.0
+  dim_feedforward: 512    # 1024 -> 512
+  dropout: 0.1
+  activation: "leaky_relu"

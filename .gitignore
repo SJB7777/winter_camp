@@ -1,0 +1,6 @@
+.codigest/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
