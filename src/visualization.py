@@ -34,6 +34,6 @@ def plot_fit_result(q_raw, y_raw, r_sim, title="Fit Result", save_path=None, sho
         buf = io.BytesIO()
         plt.savefig(buf, format='png')
         buf.seek(0)
-        img_str = base64.b64encode(buf.read()).decode('utf-8')
+        img_str = base64.b64encode(buf.read())
         plt.close()
         return img_str
