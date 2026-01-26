@@ -54,7 +54,7 @@ def upload_data():
             return jsonify({"error": "Invalid data format: Need at least 2 numeric columns"}), 400
 
         # 4. 그래프 그리기 (XRR 로그 스케일)
-        plt.figure(figsize=(6, 6), dpi=100)
+        plt.figure(figsize=(4, 4), dpi=72)
         
         # X축: 0번 컬럼, Y축: 1번 컬럼 (보통 XRR 포맷)
         plt.semilogy(df.iloc[:, 0], df.iloc[:, 1], 'b-', linewidth=1.5, label='Experimental Data')
@@ -67,7 +67,7 @@ def upload_data():
         
         # 5. 이미지 인코딩
         buf = io.BytesIO()
-        plt.savefig(buf, format='png')
+        plt.savefig(buf, format='jpg')
         buf.seek(0)
         image_base64 = base64.b64encode(buf.read()).decode('utf-8')
         
