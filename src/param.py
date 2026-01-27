@@ -8,7 +8,7 @@ from src.config import SampleConfig
 @dataclass
 class Instrument:
     """Legacy Instrument class, kept for compatibility with older tests/logic if needed."""
-    wavelength: float = 1.54
+    wavelength: float = 1.5406
     I0: float = 1.0
     Ibkg: float = 1e-10
     res: float = 0.0001

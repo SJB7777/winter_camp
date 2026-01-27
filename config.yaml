@@ -24,7 +24,7 @@ data:
 # [3. Instrument Hardware (True Constants)]
 # 파장은 하드웨어 고유값이므로 유일한 상수입니다.
 instrument:
-  wavelength: 1.5406  # Cu K-alpha
+  wavelength: 1.540606  # Cu K-alpha
 
 # =============================================================================
 # [4. Simulation Parameters (Dynamic Training Ranges)]

@@ -15,7 +15,7 @@ LOG_VALID_THRESHOLD = -14.0  # Data above this threshold is considered valid
 # Physical Constants
 # ==============================================================================
 # Cu K-alpha X-ray wavelength [Å]
-CU_K_ALPHA_WAVELENGTH = 1.5406
+CU_K_ALPHA_WAVELENGTH = 1.540606
 
 # Classical electron radius [Å]
 RE_ANGSTROM = 2.81794032e-5

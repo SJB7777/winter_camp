@@ -8,12 +8,12 @@ from numpy.typing import NDArray
 r_e: Final[float] = 2.8179403227e-5  # AA
 
 @overload
-def tth2q(tth: float, wavelen: float = 1.54) -> float: ...
+def tth2q(tth: float, wavelen: float = 1.5406) -> float: ...
 
 @overload
-def tth2q(tth: NDArray[np.float64], wavelen: float = 1.54) -> NDArray[np.float64]: ...
+def tth2q(tth: NDArray[np.float64], wavelen: float = 1.5406) -> NDArray[np.float64]: ...
 
-def tth2q(tth, wavelen: float = 1.5406):
+def tth2q(tth, wavelen: float = 1.540606):
     """
     Convert 2θ (in degrees) and wavelength (in Å) to scattering vector q (in 1/Å).
     Formula: q = (4 * pi / lambda) * sin(theta)

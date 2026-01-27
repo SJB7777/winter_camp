@@ -93,7 +93,7 @@ class AbelesMatrix(nn.Module):
                 sld: Tensor,
                 sample_length: Optional[Tensor] = None,
                 beam_width: Optional[Tensor] = None,
-                wavelength: float = 1.5406) -> Tensor:
+                wavelength: float = 1.540606) -> Tensor:
         
         if self.device is None: self.device = q.device
         

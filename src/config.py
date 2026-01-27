@@ -64,7 +64,7 @@ class SampleConfig(BaseModel):
 # ==============================================================================
 
 class InstrumentConfig(BaseModel):
-    wavelength: float = 1.5406
+    wavelength: float = 1.540606
     beam_width: float = 0.1
     res: float = 0.002
     I0: float = 1.0
