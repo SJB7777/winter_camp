@@ -2,7 +2,7 @@ import torch
 import numpy as np
 from src.config import CONFIG
 
-def simulate_reflectivity(param_tensors, q_tensor, physics_engine, device):
+def simulate_reflectivity(param_tensors, q_tensor, physics_engine, device) -> torch.Tensor:
     """
     Refine Optimizer용 시뮬레이션 함수.
     [핵심 수정] 0.2도(Anchor)에서 시뮬레이션 값도 강제로 1.0으로 맞춤 (Scale Locking)
