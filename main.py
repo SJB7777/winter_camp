@@ -33,6 +33,6 @@ def api_nn_predict():
         "q": data["q"],
         "raw_refl": data["refl"],
         "refl_sim": r_sim.cpu().numpy().tolist(),
-        "std_loss": std_loss,
+        "std_loss": float(std_loss),
         "params": initial_params
         }), HTTP_CODE
