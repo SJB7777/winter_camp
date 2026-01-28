@@ -7,9 +7,9 @@ from src.abeles import AbelesMatrix
 from src.losses import compute_standard_loss
 from src.visualization import plot_fit_result
 
-
-AI_MODEL, _ = load_model_from_checkpoint(ckpt_path, DEVICE)
+ckpt_path = "checkpoints/model.pt"
 DEVICE = torch.device("cpu")
+AI_MODEL, _ = load_model_from_checkpoint(ckpt_path, DEVICE)
 PHYSICS_ENGINE = AbelesMatrix(device=DEVICE)
 HTTP_CODE = 200
 
