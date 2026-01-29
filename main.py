@@ -24,7 +24,7 @@ def api_nn_predict():
     initial_params = predict_initial_params(
         AI_MODEL, q, torch.log(refl), DEVICE
     )
-
+    params = {k: float(v) for k, v in initial_params.items()}
     with torch.no_grad():
         r_sim = simulate_reflectivity(initial_params, q, PHYSICS_ENGINE, DEVICE)
         std_loss = compute_standard_loss(r_sim, refl)
@@ -34,5 +34,5 @@ def api_nn_predict():
         "raw_refl": data["refl"],
         "refl_sim": r_sim.cpu().numpy().tolist(),
         "std_loss": float(std_loss),
-        "params": initial_params
+        "params": params
         }), HTTP_CODE
