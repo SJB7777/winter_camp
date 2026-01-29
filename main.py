@@ -18,6 +18,10 @@ app = Flask(__name__)
 @app.route('/nn_predict', methods=['POST'])
 def api_nn_predict():
     data = request.get_json()
+    for key in ["q", "refl"]:
+        if key not in data:
+            return jsonify({"error": f"Missing key: {key}"}), 400
+
     q = torch.Tensor(data["q"])
     refl = torch.Tensor(data["refl"])
 
