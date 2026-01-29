@@ -76,6 +76,6 @@ def predict_initial_params(
     # ParamSet._params는 {key: Tensor(batch, 1)} 형태임
     result_dict = {}
     for key, tensor_val in predicted_params_set._params.items():
-        result_dict[key] = float(tensor_val.item())
+        result_dict[key] = tensor_val
 
     return result_dict
